@@ -1,0 +1,28 @@
+{
+  "repositories": [
+    {
+      "name": "bof-vs",
+      "path": "refs/bof-vs",
+      "remote_url": "https://github.com/Cobalt-Strike/bof-vs.git",
+      "commit": "c9b3ae2276cced9335cdc73cd4956b8a9b3b0708"
+    },
+    {
+      "name": "bof_template",
+      "path": "refs/bof_template",
+      "remote_url": "https://github.com/Cobalt-Strike/bof_template.git",
+      "commit": "2e6b441754b8ce8f1e4521ae8033c38b4502e07c"
+    },
+    {
+      "name": "CS-Situational-Awareness-BOF",
+      "path": "refs/CS-Situational-Awareness-BOF",
+      "remote_url": "https://github.com/trustedsec/CS-Situational-Awareness-BOF",
+      "commit": "ee9459cc4f42c6b025797bad22ffe8d9f1cf6487"
+    },
+    {
+      "name": "forge",
+      "path": "refs/forge",
+      "remote_url": "https://github.com/MythicAgents/forge.git",
+      "commit": "046169f7fbf795764275b7bd6b221eb1c9472f22"
+    }
+  ]
+}

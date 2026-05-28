@@ -1,0 +1,24 @@
+# Project-wide defaults live here.
+# End users keep the built-in ~/.nano-bofs state directory by default.
+# For repo-local testing overrides, create a gitignored nano-bofs.local.toml.
+#
+# Uncomment and adjust settings below to override the defaults.
+#
+# Example: keep the default user-home state directory explicitly.
+# [paths]
+# state_dir = "~/.nano-bofs"
+#
+# Example: write final BOF artifacts into a dedicated output folder.
+# [paths]
+# output_dir = "out"
+#
+# Example: prefer a specific build backend.
+# [build]
+# Use docker to build
+# default_backend = "docker"
+# Use installed MinGW cross-compilers (x86_64-w64-mingw32-gcc / i686-w64-mingw32-gcc)
+# default_backend = "local"
+#
+# Example: pin the Docker image used for BOF builds.
+# [build]
+# docker_image = "freefirex2/ts_bof_builder:latest"

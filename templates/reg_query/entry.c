@@ -1,0 +1,505 @@
+#include <windows.h>
+#include <process.h>
+#include <string.h>
+#include "bofdefs.h"
+#include "base.c"
+#include "anticrash.c"
+#include "stack.c"
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wint-conversion"
+char ** ERegTypes = 1;
+char * gHiveName = 1;
+#pragma GCC diagnostic pop
+
+typedef struct _regkeyval {
+    char *keypath;
+    DWORD dwkeypathsz;
+    HKEY hreg;
+} regkeyval, *pregkeyval;
+
+
+void init_enums(void)
+{
+    ERegTypes = antiStringResolve(12, "REG_NONE", "REG_SZ", "REG_EXPAND_SZ", "REG_BINARY", "REG_DWORD", "REGDWORD_BE", "REG_LINK", "REG_MULTI_SZ", "REG_RESOURCE_LIST", "REG_FULL_RESOURCE_DESC", "REG_RESOURCE_REQ_LIST", "REG_QWORD");
+}
+
+
+void free_enums(void)
+{
+    intFree(ERegTypes);
+}
+
+
+void set_hive_name(DWORD h)
+{
+    if (h == 2)
+    {
+        gHiveName = "HKEY_LOCAL_MACHINE";
+    }
+    else if (h == 1)
+    {
+        gHiveName = "HKEY_CURRENT_USER";
+    }
+    else if (h == 3)
+    {
+        gHiveName = "HKEY_USERS";
+    }
+    else if (h == 0)
+    {
+        gHiveName = "HKEY_CLASSES_ROOT";
+    }
+    else
+    {
+        gHiveName = "UNKNOWN";
+    }
+}
+
+
+pregkeyval init_regkey(const char *curpath, DWORD dwcurpathsz, const char *childkey, DWORD dwchildkeysz, HKEY hreg)
+{
+    pregkeyval item = (pregkeyval)intAlloc(sizeof(regkeyval));
+
+    item->dwkeypathsz = dwcurpathsz + (dwchildkeysz ? dwchildkeysz + 1 : 0);
+    item->keypath = intAlloc(item->dwkeypathsz + 1);
+    memcpy(item->keypath, curpath, dwcurpathsz);
+    if (dwchildkeysz > 0)
+    {
+        item->keypath[dwcurpathsz] = '\\';
+        memcpy(item->keypath + dwcurpathsz + 1, childkey, dwchildkeysz);
+    }
+    item->keypath[item->dwkeypathsz] = 0;
+    item->hreg = hreg;
+    return item;
+}
+
+
+void free_regkey(pregkeyval val)
+{
+    if (val->keypath)
+    {
+        intFree(val->keypath);
+    }
+    if (val->hreg)
+    {
+        ADVAPI32$RegCloseKey(val->hreg);
+    }
+}
+
+
+void Reg_KeyToTimestamp(HKEY key, char *stringDate)
+{
+    FILETIME mytime;
+    LSTATUS stat;
+    SYSTEMTIME system_time;
+    SYSTEMTIME local_time;
+
+    stat = ADVAPI32$RegQueryInfoKeyA(key, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, &mytime);
+    if (stat != ERROR_SUCCESS)
+    {
+        BeaconPrintf(CALLBACK_ERROR, "Error calling RegQueryInfoKeyA with error code %d\n", stat);
+        return;
+    }
+
+    KERNEL32$FileTimeToSystemTime(&mytime, &system_time);
+    KERNEL32$SystemTimeToTzSpecificLocalTime(NULL, &system_time, &local_time);
+    MSVCRT$sprintf(stringDate, "%02i/%02i/%04i %02i:%02i:%02i", local_time.wMonth, local_time.wDay, local_time.wYear, local_time.wHour, local_time.wMinute, local_time.wSecond);
+}
+
+
+void Reg_InternalPrintKey(char *data, const char *valuename, DWORD type, DWORD datalen, HKEY key)
+{
+    char default_name[] = {'[', 'N', 'U', 'L', 'L', ']', 0};
+    int i = 0;
+
+    (void)key;
+    if (valuename == NULL)
+    {
+        valuename = default_name;
+    }
+    internal_printf("\t%-20s   %-15s ", valuename, (type <= 11) ? ERegTypes[type] : "UNKNOWN");
+
+    if (type == REG_BINARY)
+    {
+        for (i = 0; i < (int)datalen; i++)
+        {
+            if (i % 16 == 0)
+            {
+                internal_printf("\n");
+            }
+            internal_printf(" %2.2x ", data[i] & 0xff);
+        }
+        internal_printf("\n");
+    }
+    else if ((type == REG_DWORD || type == REG_DWORD_BIG_ENDIAN) && datalen == 4)
+    {
+        internal_printf("%lu\n", *(DWORD *)data);
+    }
+    else if (type == REG_QWORD && datalen == 8)
+    {
+        internal_printf("%llu\n", *(QWORD *)data);
+    }
+    else if (type == REG_SZ || type == REG_EXPAND_SZ)
+    {
+        internal_printf("%s\n", data);
+    }
+    else if (type == REG_MULTI_SZ)
+    {
+        while (data[0] != '\0')
+        {
+            DWORD len = MSVCRT$strlen(data) + 1;
+            internal_printf("%s%s", data, data[len] ? "\\0" : "");
+            data += len;
+        }
+        internal_printf("\n");
+    }
+    else
+    {
+        internal_printf("None data type, or unhandled\n");
+    }
+}
+
+
+DWORD Reg_GetValue(const char *hostname, HKEY hivekey, DWORD Arch, const char *keystring, const char *value)
+{
+    HKEY key = 0;
+    HKEY RemoteKey = NULL;
+    char *ValueData = NULL;
+    DWORD type = 0;
+    DWORD dwRet = 0;
+    DWORD size = 0;
+
+    (void)Arch;
+    if (hostname == NULL)
+    {
+        dwRet = ADVAPI32$RegOpenKeyExA(hivekey, keystring, 0, KEY_READ, &key);
+        if (dwRet)
+        {
+            goto END;
+        }
+    }
+    else
+    {
+        dwRet = ADVAPI32$RegConnectRegistryA(hostname, hivekey, &RemoteKey);
+        if (dwRet)
+        {
+            internal_printf("failed to connect");
+            goto END;
+        }
+        dwRet = ADVAPI32$RegOpenKeyExA(RemoteKey, keystring, 0, KEY_READ, &key);
+        if (dwRet)
+        {
+            internal_printf("failed to open remote key");
+            goto END;
+        }
+    }
+
+    dwRet = ADVAPI32$RegQueryValueExA(key, value, NULL, &type, NULL, &size);
+    if (dwRet != ERROR_SUCCESS)
+    {
+        goto END;
+    }
+    if (type == REG_SZ || type == REG_EXPAND_SZ || type == REG_MULTI_SZ)
+    {
+        size += 2;
+    }
+    ValueData = intAlloc(size);
+    if (ValueData == NULL)
+    {
+        BeaconPrintf(CALLBACK_ERROR, "Failed to allocate memory\n");
+        dwRet = E_OUTOFMEMORY;
+        goto END;
+    }
+    dwRet = ADVAPI32$RegQueryValueExA(key, value, NULL, &type, (LPBYTE)ValueData, &size);
+    if (!dwRet)
+    {
+        char stringDate[19];
+
+        Reg_KeyToTimestamp(key, stringDate);
+        internal_printf("%24s %s\\%s\n", stringDate, gHiveName, keystring);
+        Reg_InternalPrintKey(ValueData, value, type, size, key);
+    }
+
+END:
+    if (ValueData)
+    {
+        intFree(ValueData);
+    }
+    if (key)
+    {
+        ADVAPI32$RegCloseKey(key);
+    }
+    if (RemoteKey)
+    {
+        ADVAPI32$RegCloseKey(RemoteKey);
+    }
+    return dwRet;
+}
+
+
+DWORD Reg_EnumKey(const char *hostname, HKEY hivekey, DWORD Arch, const char *keystring, BOOL recursive)
+{
+    DWORD cbName = 0;
+    DWORD cSubKeys = 0;
+    DWORD cbMaxSubKey = 0;
+    DWORD cValues = 0;
+    DWORD cchMaxValue = 0;
+    DWORD cchMaxData = 0;
+    DWORD cchData = 0;
+    DWORD cchValue = 0;
+    DWORD regType = 0;
+    DWORD i = 0;
+    DWORD retCode = 0;
+    DWORD dwresult = 0;
+    HKEY rootkey = 0;
+    HKEY curKey = 0;
+    HKEY RemoteKey = 0;
+    Pstack keyStack = NULL;
+    pregkeyval curitem = NULL;
+    char *currentkeyname = NULL;
+    char *currentvaluename = NULL;
+    char *currentdata = NULL;
+
+    (void)Arch;
+    if (hostname == NULL)
+    {
+        dwresult = ADVAPI32$RegOpenKeyExA(hivekey, keystring, 0, KEY_READ, &rootkey);
+        if (dwresult)
+        {
+            goto END;
+        }
+    }
+    else
+    {
+        dwresult = ADVAPI32$RegConnectRegistryA(hostname, hivekey, &RemoteKey);
+        if (dwresult)
+        {
+            internal_printf("failed to connect");
+            goto END;
+        }
+        dwresult = ADVAPI32$RegOpenKeyExA(RemoteKey, keystring, 0, KEY_READ, &rootkey);
+        if (dwresult)
+        {
+            internal_printf("failed to open remote key");
+            goto END;
+        }
+    }
+
+    keyStack = stackInit();
+    keyStack->push(keyStack, init_regkey(keystring, MSVCRT$strlen(keystring), NULL, 0, rootkey));
+    while ((curitem = keyStack->pop(keyStack)) != NULL)
+    {
+        char stringDate[19];
+
+        Reg_KeyToTimestamp(curitem->hreg, stringDate);
+        internal_printf("%-24s %s\\%s\n", stringDate, gHiveName, curitem->keypath);
+        dwresult = ADVAPI32$RegQueryInfoKeyA(
+            curitem->hreg,
+            NULL,
+            NULL,
+            NULL,
+            &cSubKeys,
+            &cbMaxSubKey,
+            NULL,
+            &cValues,
+            &cchMaxValue,
+            &cchMaxData,
+            NULL,
+            NULL
+        );
+        if (dwresult)
+        {
+            internal_printf("failed to query info about key");
+            goto nextloop;
+        }
+
+        currentkeyname = intAlloc(cbMaxSubKey + 1);
+        currentvaluename = intAlloc(cchMaxValue + 2);
+        currentdata = intAlloc(cchMaxData);
+        if (cValues)
+        {
+            for (i = 0, retCode = ERROR_SUCCESS; i < cValues; i++)
+            {
+                cchValue = cchMaxValue + 2;
+                cchData = cchMaxData;
+                retCode = ADVAPI32$RegEnumValueA(
+                    curitem->hreg,
+                    i,
+                    currentvaluename,
+                    &cchValue,
+                    NULL,
+                    &regType,
+                    (LPBYTE)currentdata,
+                    &cchData
+                );
+                if (retCode == ERROR_SUCCESS)
+                {
+                    Reg_InternalPrintKey(currentdata, currentvaluename, regType, cchData, curitem->hreg);
+                }
+            }
+            internal_printf("\n");
+        }
+        if (cSubKeys)
+        {
+            for (i = 0; i < cSubKeys; i++)
+            {
+                cbName = cbMaxSubKey + 1;
+                retCode = ADVAPI32$RegEnumKeyExA(curitem->hreg, i, currentkeyname, &cbName, NULL, NULL, NULL, NULL);
+                if (retCode == ERROR_SUCCESS)
+                {
+                    if (recursive)
+                    {
+                        dwresult = ADVAPI32$RegOpenKeyExA(curitem->hreg, currentkeyname, 0, KEY_READ, &curKey);
+                        if (dwresult)
+                        {
+                            BeaconPrintf(CALLBACK_ERROR, "Could not open key %s\\%s\\%s: Error %lx", gHiveName, curitem->keypath, currentkeyname, dwresult);
+                        }
+                        else
+                        {
+                            keyStack->push(keyStack, init_regkey(curitem->keypath, curitem->dwkeypathsz, currentkeyname, cbName, curKey));
+                        }
+                    }
+                    else
+                    {
+                        curKey = NULL;
+                        dwresult = ADVAPI32$RegOpenKeyExA(curitem->hreg, currentkeyname, 0, KEY_READ, &curKey);
+                        if (curKey)
+                        {
+                            Reg_KeyToTimestamp(curKey, stringDate);
+                        }
+                        internal_printf("%-24s %s\\%s\\%s\n", curKey ? stringDate : "Unable to get time", gHiveName, curitem->keypath, currentkeyname);
+                        if (curKey)
+                        {
+                            ADVAPI32$RegCloseKey(curKey);
+                            curKey = NULL;
+                        }
+                    }
+                }
+            }
+        }
+
+nextloop:
+        if (currentkeyname)
+        {
+            intFree(currentkeyname);
+            currentkeyname = NULL;
+        }
+        if (currentvaluename)
+        {
+            intFree(currentvaluename);
+            currentvaluename = NULL;
+        }
+        if (currentdata)
+        {
+            intFree(currentdata);
+            currentdata = NULL;
+        }
+        cSubKeys = 0;
+        cbMaxSubKey = 0;
+        cValues = 0;
+        cchMaxValue = 0;
+        cchMaxData = 0;
+        if (curitem)
+        {
+            free_regkey(curitem);
+            intFree(curitem);
+            curitem = NULL;
+        }
+    }
+
+END:
+    if (currentkeyname != NULL)
+    {
+        intFree(currentkeyname);
+    }
+    if (currentvaluename != NULL)
+    {
+        intFree(currentvaluename);
+    }
+    if (currentdata != NULL)
+    {
+        intFree(currentdata);
+    }
+    if (RemoteKey)
+    {
+        ADVAPI32$RegCloseKey(RemoteKey);
+    }
+    if (keyStack)
+    {
+        keyStack->free(keyStack);
+    }
+    return dwresult;
+}
+
+
+#ifdef BOF
+VOID go(
+    IN PCHAR Buffer,
+    IN ULONG Length
+)
+{
+    (void)Buffer;
+    (void)Length;
+
+    static const char NANO_HOSTNAME[] = "__NANO_HOSTNAME__";
+    static const char NANO_PATH[] = "__NANO_PATH__";
+    static const char NANO_VALUE[] = "__NANO_VALUE__";
+    char hostname_buffer[sizeof(NANO_HOSTNAME)];
+    char path_buffer[sizeof(NANO_PATH)];
+    char value_buffer[sizeof(NANO_VALUE)];
+    const char *hostname = NULL;
+    const char *value = NULL;
+    DWORD hive_value = (DWORD)__NANO_HIVE__;
+    HKEY hive = NULL;
+    BOOL recursive = __NANO_RECURSIVE__;
+    DWORD dwresult = 0;
+
+    if (!bofstart())
+    {
+        return;
+    }
+
+    init_enums();
+    memcpy(hostname_buffer, NANO_HOSTNAME, sizeof(NANO_HOSTNAME));
+    memcpy(path_buffer, NANO_PATH, sizeof(NANO_PATH));
+    memcpy(value_buffer, NANO_VALUE, sizeof(NANO_VALUE));
+    hostname = hostname_buffer[0] ? hostname_buffer : NULL;
+    value = value_buffer[0] ? value_buffer : NULL;
+    set_hive_name(hive_value);
+    switch (hive_value)
+    {
+        case 0:
+            hive = HKEY_CLASSES_ROOT;
+            break;
+        case 1:
+            hive = HKEY_CURRENT_USER;
+            break;
+        case 2:
+            hive = HKEY_LOCAL_MACHINE;
+            break;
+        case 3:
+            hive = HKEY_USERS;
+            break;
+        default:
+            BeaconPrintf(CALLBACK_ERROR, "Invalid hive value: %lu", hive_value);
+            free_enums();
+            printoutput(TRUE);
+            return;
+    }
+
+    if (value)
+    {
+        dwresult = Reg_GetValue(hostname, hive, 0, path_buffer, value);
+    }
+    else
+    {
+        dwresult = Reg_EnumKey(hostname, hive, 0, path_buffer, recursive);
+    }
+    if (dwresult)
+    {
+        BeaconPrintf(CALLBACK_ERROR, "Failed to query Regkey, error value: %d", dwresult);
+    }
+    printoutput(TRUE);
+    free_enums();
+}
+#endif

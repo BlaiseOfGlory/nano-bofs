@@ -1,0 +1,106 @@
+name: Build and push nano_bofs image
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Container tag to publish, usually the release tag such as v0.1.0."
+        required: true
+        type: string
+      publish_latest:
+        description: "Also publish the image as latest."
+        required: false
+        default: true
+        type: boolean
+    outputs:
+      image_ref:
+        description: "Fully qualified GHCR image name without tag."
+        value: ${{ jobs.docker.outputs.image_ref }}
+      image_digest:
+        description: "Published image digest."
+        value: ${{ jobs.docker.outputs.image_digest }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: nano_bofs
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.image.outputs.image_ref }}
+      image_digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Disable Git hooks
+        run: git config --global core.hooksPath /dev/null
+
+      - name: Normalize image coordinates
+        id: image
+        shell: bash
+        run: |
+          image_owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image_ref="${REGISTRY}/${image_owner}/${IMAGE_NAME}"
+          printf 'IMAGE_OWNER=%s\n' "$image_owner" >> "$GITHUB_ENV"
+          printf 'IMAGE_REF=%s\n' "$image_ref" >> "$GITHUB_ENV"
+          printf 'image_ref=%s\n' "$image_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Build image tag list
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          PUBLISH_LATEST: ${{ inputs.publish_latest }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'image_tag must look like vMAJOR.MINOR.PATCH; got: %s\n' "$IMAGE_TAG" >&2
+            exit 1
+          fi
+
+          {
+            printf 'IMAGE_TAGS<<EOF\n'
+            printf '%s:%s\n' "$IMAGE_REF" "$IMAGE_TAG"
+            if [[ "$PUBLISH_LATEST" == "true" ]]; then
+              printf '%s:latest\n' "$IMAGE_REF"
+            fi
+            printf 'EOF\n'
+          } >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Payload_Type/nano_bofs/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=nano_bofs Mythic command augmentation service
+            org.opencontainers.image.licenses=BSD-3-Clause AND MIT AND GPL-2.0-only
+            org.opencontainers.image.version=${{ inputs.image_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-name: ${{ env.IMAGE_REF }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

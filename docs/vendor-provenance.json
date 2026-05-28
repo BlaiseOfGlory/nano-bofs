@@ -1,0 +1,19 @@
+{
+  "vendored_packages": [
+    {
+      "name": "python-ldap-filter",
+      "package": "ldap-filter",
+      "remote_url": "https://github.com/SteveEwell/python-ldap-filter",
+      "version": "1.0.1",
+      "commit": "c608ea4fc2b069a92703fde17e288794f19adb78",
+      "license": "MIT",
+      "copied_paths": [
+        "src/nano_bofs/_vendor/ldap_filter",
+        "Payload_Type/nano_bofs/src/nano_bofs/_vendor/ldap_filter"
+      ],
+      "local_modifications": [
+        "Changed absolute intra-package imports in filter.py to relative imports for nested vendoring under nano_bofs._vendor."
+      ]
+    }
+  ]
+}

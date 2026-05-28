@@ -1,0 +1,19 @@
+[project]
+name = "nano-bofs-mythic-runtime"
+version = "0.1.0"
+description = "Runtime package for the nano_bofs Mythic augmentation service."
+requires-python = ">=3.11"
+license = "BSD-3-Clause AND MIT AND GPL-2.0-only"
+authors = [
+    { name = "nano-bofs contributors" },
+]
+dependencies = [
+    "mythic-container==0.6.14",
+]
+
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nano_bofs"]

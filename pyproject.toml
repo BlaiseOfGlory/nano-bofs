@@ -1,0 +1,63 @@
+[project]
+name = "nano-bofs"
+version = "0.1.0"
+description = "Render nano BOF templates from user-friendly arguments."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause AND MIT AND GPL-2.0-only"
+authors = [
+    { name = "nano-bofs contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/BlaiseOfGlory/nano-bofs"
+Repository = "https://github.com/BlaiseOfGlory/nano-bofs"
+Issues = "https://github.com/BlaiseOfGlory/nano-bofs/issues"
+
+[project.scripts]
+nano-bofs = "nano_bofs.cli:main"
+nano-bofsx = "nano_bofs.cli:main_axi"
+
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nano_bofs"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "nano_bofs/templates"
+"shared" = "nano_bofs/shared"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.agents",
+    "/.agents/**",
+    "/.github",
+    "/.github/**",
+    "/.git",
+    "/.mypy_cache",
+    "/.pytest_cache",
+    "/.ruff_cache",
+    "/.uv-cache",
+    "/.venv",
+    "/Payload_Type/nano_bofs/.nano-bofs-state",
+    "/Payload_Type/nano_bofs/.uv-cache",
+    "/Payload_Type/nano_bofs/.venv-win",
+    "/Payload_Type/nano_bofs/*.log",
+    "/Payload_Type/nano_bofs/rabbitmq_config.json",
+    "/build",
+    "/dist",
+    "/out",
+    "/refs",
+    "/refs/**",
+    "/nano-bofs.local.toml",
+]

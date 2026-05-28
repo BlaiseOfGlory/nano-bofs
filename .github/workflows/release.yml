@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON_DOWNLOADS: never
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Disable Git hooks
+        run: git config --global core.hooksPath /dev/null
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+
+      - name: Verify tag format
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'tag must look like vMAJOR.MINOR.PATCH; got: %s\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Verify tag matches project versions
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path("pyproject.toml")
+          runtime = pathlib.Path("Payload_Type/nano_bofs/pyproject.toml")
+          root_version = tomllib.loads(root.read_text(encoding="utf-8"))["project"]["version"]
+          runtime_version = tomllib.loads(runtime.read_text(encoding="utf-8"))["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          expected = f"v{root_version}"
+
+          if root_version != runtime_version:
+              raise SystemExit(
+                  f"root version ({root_version}) does not match Mythic runtime version ({runtime_version})"
+              )
+          if tag != expected:
+              raise SystemExit(f"tag {tag} does not match pyproject version {expected}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={root_version}\n")
+          print(f"release version: {root_version}")
+          PY
+
+      - name: Verify tag commit is reachable from master
+        shell: bash
+        run: |
+          git fetch --no-tags origin master:refs/remotes/origin/master
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          git merge-base --is-ancestor "$tag_commit" origin/master
+          printf 'tag %s points at reachable commit %s\n' "$GITHUB_REF_NAME" "$tag_commit"
+
+      - name: Sync root dependencies
+        run: uv sync --locked --python 3.11
+
+      - name: Run unit tests
+        run: .venv/bin/python -m unittest
+
+      - name: Build Python package
+        run: uv build
+
+      - name: Smoke test built wheel
+        run: |
+          python -m venv /tmp/nano-bofs-wheel
+          /tmp/nano-bofs-wheel/bin/python -m pip install --no-index --find-links dist nano-bofs
+          /tmp/nano-bofs-wheel/bin/nano-bofs list
+          /tmp/nano-bofs-wheel/bin/python - <<'PY'
+          import nano_bofs.template_catalog as template_catalog
+
+          names = set(template_catalog.discover_templates())
+          assert "probe" in names
+          assert "ldapsearch" in names
+          print(f"loaded {len(names)} templates from installed wheel")
+          PY
+
+      - name: Sync Mythic runtime dependencies
+        working-directory: Payload_Type/nano_bofs
+        run: uv sync --locked --python 3.11
+
+      - name: Smoke test Mythic runtime imports
+        working-directory: Payload_Type/nano_bofs
+        run: |
+          .venv/bin/python - <<'PY'
+          import mythic_container
+          import nano_bofs.template_catalog as template_catalog
+
+          names = set(template_catalog.discover_templates())
+          assert "mythicSmoke" in names
+          assert "ldapsearch" in names
+          print(f"loaded {len(names)} templates")
+          PY
+
+  docker:
+    needs: verify
+    uses: ./.github/workflows/docker.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    secrets: inherit
+    with:
+      image_tag: ${{ github.ref_name }}
+      publish_latest: true
+
+  publish-release:
+    needs:
+      - verify
+      - docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Disable Git hooks
+        run: git config --global core.hooksPath /dev/null
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+
+      - name: Sync root dependencies
+        run: uv sync --locked --python 3.11
+
+      - name: Build release artifacts
+        run: uv build
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --generate-notes \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag
