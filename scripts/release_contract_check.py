@@ -96,6 +96,12 @@ def check_png(path: Path) -> None:
         fail(f"{path} is not an alpha-capable PNG; IHDR color type is {color_type}")
 
 
+def check_svg(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if "<svg" not in text[:200]:
+        fail(f"{path} is not an SVG")
+
+
 def tracked_files() -> list[str]:
     result = subprocess.run(
         ["git", "ls-files"],
@@ -210,6 +216,10 @@ def main() -> int:
         fail(f"Mythic icon path does not exist: {icon_file.relative_to(REPO_ROOT)}")
     if icon_file.suffix.lower() == ".png":
         check_png(icon_file)
+    elif icon_file.suffix.lower() == ".svg":
+        check_svg(icon_file)
+    else:
+        fail(f"Mythic icon must be PNG or SVG; got {icon_file.relative_to(REPO_ROOT)}")
 
     config = json.loads((REPO_ROOT / "config.json").read_text(encoding="utf-8"))
     if config.get("exclude_agent_icons") is not False:
@@ -219,12 +229,12 @@ def main() -> int:
     if image_ref != expected_image_ref:
         fail(f"config.json nano_bofs image {image_ref!r} does not match expected {expected_image_ref!r}")
 
-    installer_icon = REPO_ROOT / "agent_icons" / "nano_bofs.png"
+    installer_icon = REPO_ROOT / "agent_icons" / "nano_bofs.svg"
     if not installer_icon.exists():
-        fail("agent_icons/nano_bofs.png is required for Mythic's installed-service icon")
-    check_png(installer_icon)
+        fail("agent_icons/nano_bofs.svg is required for Mythic's installed-service icon")
+    check_svg(installer_icon)
     if installer_icon.read_bytes() != icon_file.read_bytes():
-        fail("agent_icons/nano_bofs.png does not match the runtime Mythic icon")
+        fail("agent_icons/nano_bofs.svg does not match the runtime Mythic icon")
 
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     if f"@{tag}" not in readme:

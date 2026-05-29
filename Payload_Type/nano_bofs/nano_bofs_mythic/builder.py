@@ -19,7 +19,7 @@ class NanoBofs(PayloadType):
     build_steps = []
     agent_type = AgentType.CommandAugment
     command_augment_supported_agents = ["apollo"]
-    semver = "0.1.1"
+    semver = "0.1.2"
     agent_path = PurePath(".") / "nano_bofs_mythic"
-    agent_icon_path = agent_path / "nano_bofs.png"
+    agent_icon_path = agent_path / "nano_bofs.svg"
     dark_mode_agent_icon_path = agent_icon_path
