@@ -19,7 +19,7 @@ That gives operators a simpler workflow:
 Install `nano-bofs` as a UV tool from the GitHub repo:
 
 ```powershell
-uv tool install git+https://github.com/BlaiseOfGlory/nano-bofs@v0.1.0
+uv tool install git+https://github.com/BlaiseOfGlory/nano-bofs@v0.1.1
 ```
 
 Pin a release tag or commit for repeatable installs. Avoid installing from a moving branch for operational use.
@@ -159,4 +159,4 @@ The Mythic service is a `command_augmentation` container, so it exposes commands
 
 ## Status
 
-Current tracked version: `0.1.0`.
+Current tracked version: `0.1.1`.

@@ -1,6 +1,6 @@
 [project]
 name = "nano-bofs-mythic-runtime"
-version = "0.1.0"
+version = "0.1.1"
 description = "Runtime package for the nano_bofs Mythic augmentation service."
 requires-python = ">=3.11"
 license = "BSD-3-Clause AND MIT AND GPL-2.0-only"

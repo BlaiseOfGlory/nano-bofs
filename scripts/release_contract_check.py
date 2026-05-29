@@ -212,10 +212,19 @@ def main() -> int:
         check_png(icon_file)
 
     config = json.loads((REPO_ROOT / "config.json").read_text(encoding="utf-8"))
+    if config.get("exclude_agent_icons") is not False:
+        fail("config.json must set exclude_agent_icons to false so Mythic can install the service icon")
     image_ref = config.get("remote_images", {}).get("nano_bofs")
     expected_image_ref = f"{IMAGE_REF_PREFIX}{tag}"
     if image_ref != expected_image_ref:
         fail(f"config.json nano_bofs image {image_ref!r} does not match expected {expected_image_ref!r}")
+
+    installer_icon = REPO_ROOT / "agent_icons" / "nano_bofs.png"
+    if not installer_icon.exists():
+        fail("agent_icons/nano_bofs.png is required for Mythic's installed-service icon")
+    check_png(installer_icon)
+    if installer_icon.read_bytes() != icon_file.read_bytes():
+        fail("agent_icons/nano_bofs.png does not match the runtime Mythic icon")
 
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     if f"@{tag}" not in readme:
